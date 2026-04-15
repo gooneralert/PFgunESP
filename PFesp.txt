@@ -3,17 +3,7 @@ local Camera = workspace.CurrentCamera
 local ESP_Utility = {}
 ESP_Utility.__index = ESP_Utility
 
--- Configuration options
-local showPlayerNames = true 
-
 ESP_Utility.TrackersToUpdate = {}
-
-local function magnitude(p1, p2)
-	local dx = p2.X - p1.X
-	local dy = p2.Y - p1.Y
-	local dz = p2.Z - p1.Z
-	return math.sqrt(dx*dx + dy*dy + dz*dz)
-end
 
 local function WorldToScreen(position)
     local screenPos, onScreen = Camera:WorldToViewportPoint(position)
@@ -21,197 +11,97 @@ local function WorldToScreen(position)
 end
 
 local BasePartTypes = {
-	["Part"] = "BasePart",
-	["MeshPart"] = "BasePart",
-	["UnionOperation"] = "BasePart",
-	["Model"] = "Model",
+    ["Part"] = "BasePart", ["MeshPart"] = "BasePart", ["UnionOperation"] = "BasePart", ["Model"] = "Model",
 }
 
 local function IsValidObject(Object)
-	if type(Object) == "userdata" and Object and Object.ClassName then 
-		local Type = BasePartTypes[Object.ClassName]
-		return Type
-	end
-	return nil
-end
-
-local function GetObjectFromModel(Model)
-	local CommonNames = {"HumanoidRootPart","Root", "RootPart", "Core"}
-	local Children = Model:GetChildren()
-
-	for _, Name in ipairs(CommonNames) do
-		for _, Child in ipairs(Children) do
-			if string.lower(Child.Name) == string.lower(Name) and BasePartTypes[Child.ClassName] == "BasePart" then
-				return Child
-			end
-		end
-	end
-
-	if Model.ClassName == "Model" and Model.PrimaryPart then 
-		return Model.PrimaryPart
-	end
-
-	local LargestPart = nil
-	local MaxVolume = 0
-	for _, Child in ipairs(Model:GetChildren()) do	
-		if BasePartTypes[Child.ClassName] then
-			local Volume = Child.Size.X * Child.Size.Y * Child.Size.Z
-			if Volume > MaxVolume then
-				MaxVolume = Volume
-				LargestPart = Child
-			end
-		end
-	end
-	return LargestPart
+    if type(Object) == "userdata" and Object and Object.ClassName then 
+        return BasePartTypes[Object.ClassName]
+    end
+    return nil
 end
 
 function ESP_Utility.NewTracker(Object, CustomName, Color)
-	local ObjectType = IsValidObject(Object)
-	if not ObjectType then return end 
+    local ObjectType = IsValidObject(Object)
+    if not ObjectType then return end 
 
-	if ObjectType == "Model" then 
-		local Model = Object
-		CustomName = CustomName or Object.Name
-		Object = GetObjectFromModel(Model)
-		if Object == nil then return end 
-	end
+    if ESP_Utility.TrackersToUpdate[Object] then return ESP_Utility.TrackersToUpdate[Object] end
 
-	if ESP_Utility.TrackersToUpdate[Object] then
-		return ESP_Utility.TrackersToUpdate[Object]
-	end
+    local self = setmetatable({}, ESP_Utility)
+    self.Name = CustomName or Object.Name
+    self.Object = Object
+    self.Color = Color or Color3.fromRGB(255,255,255)
+    self.Drawings = {}
+    self.Visible = true
 
-	local self = setmetatable({}, ESP_Utility)
-	self.Name = CustomName or Object.Name
-	self.Object = Object
-	self.Color = Color or Color3.fromRGB(255,255,255)
-	self.Drawings = {}
-	self.ObjectType = ObjectType
-	self.DrawingOrder = {}
-	self.Visible = true
-	self.TrackerOffScreen = false
+    -- Box
+    self.Drawings["Box"] = Drawing.new("Square")
+    self.Drawings["Box"].Thickness = 1
+    self.Drawings["Box"].Filled = false
+    self.Drawings["Box"].Color = self.Color
 
-    -- Create default Square drawing
-    self.Drawings["Square"] = {
-        Drawing = Drawing.new("Square"),
-        Visible = true
-    }
-    self.Drawings["Square"].Drawing.Thickness = 1
-    self.Drawings["Square"].Drawing.Filled = false
-    self.Drawings["Square"].Drawing.Color = self.Color
+    -- Name
+    self.Drawings["Name"] = Drawing.new("Text")
+    self.Drawings["Name"].Size = 18
+    self.Drawings["Name"].Center = true
+    self.Drawings["Name"].Outline = true
+    self.Drawings["Name"].Color = Color3.new(1,1,1)
+    self.Drawings["Name"].Text = self.Name
 
-	ESP_Utility.TrackersToUpdate[Object] = self
-	return self
-end
-
-function ESP_Utility:Destroy()
-    for _, data in pairs(self.Drawings) do
-        local obj = (type(data) == "table" and data.Drawing) or data
-        obj:Remove()
-    end
-    ESP_Utility.TrackersToUpdate[self.Object] = nil
-end
-
-function ESP_Utility:_IsAlive()
-	if not self.Object or not self.Object.Parent then return false end 
-	return self.Object:IsDescendantOf(game.Workspace)
-end
-
-local CORNER_OFFSETS = {
-	Vector3.new(-1, -1, -1), Vector3.new( 1, -1, -1),
-	Vector3.new( 1, -1,  1), Vector3.new(-1, -1,  1),
-	Vector3.new(-1,  1, -1), Vector3.new( 1,  1, -1),
-	Vector3.new( 1,  1,  1), Vector3.new(-1,  1,  1),
-}
-
-function ESP_Utility:_Get2D_Bounds()
-	local position = self.Object.Position
-	local size     = self.Object.Size
-	local half     = size * 0.5
-
-	local minX, minY =  math.huge,  math.huge
-	local maxX, maxY = -math.huge, -math.huge
-
-    for i = 1, 8 do
-        local offset = CORNER_OFFSETS[i]
-        local worldPos = position + (offset * half)
-        local screenPos, onScreen = WorldToScreen(worldPos)
-
-        if not onScreen then return nil end 
-
-        if screenPos.X < minX then minX = screenPos.X end
-        if screenPos.Y < minY then minY = screenPos.Y end
-        if screenPos.X > maxX then maxX = screenPos.X end
-        if screenPos.Y > maxY then maxY = screenPos.Y end
-    end
-    return minX, minY, maxX, maxY
-end
-
-function ESP_Utility:_SetTextPosition(DrawingObject, Y_Offset)
-	local Session = self.Session
-	local FontSize = DrawingObject.Size or 20
-	local Padding = 5
-    
-    DrawingObject.Center = true
-	DrawingObject.Position = Vector2.new(Session.CenterX, Session.TopY - Padding - ((Y_Offset + 1) * FontSize))
-end
-
-function ESP_Utility:_DetermineVisibility()
-	local shouldRender = self.Visible and not self.TrackerOffScreen
-
-	for drawingName, data in pairs(self.Drawings) do
-		local DrawingObject = (type(data) == "table" and data.Drawing) or data
-		if not shouldRender then
-			DrawingObject.Visible = false
-		else
-			DrawingObject.Visible = data.Visible or true
-		end
-	end
-	return shouldRender
+    ESP_Utility.TrackersToUpdate[Object] = self
+    return self
 end
 
 function ESP_Utility:_Update()
-	if not self:_IsAlive() then 
-		self:Destroy()
-		return 
-	end 
-
-	local min_x, min_y, max_x, max_y = self:_Get2D_Bounds()
-	self.TrackerOffScreen = (min_x == nil)
-
-	local ShouldRender = self:_DetermineVisibility()
-	if not ShouldRender then return end 
-
-	local boxWidth = max_x - min_x
-	self.Session = {
-		CenterX = min_x + (boxWidth / 2),
-		TopY = min_y
-	}
-
-	-- Update Square
-	local SquareData = self.Drawings["Square"]
-    if SquareData then
-        local Square = SquareData.Drawing
-        Square.Position = Vector2.new(min_x, min_y)
-        Square.Size = Vector2.new(boxWidth, max_y - min_y)
+    if not self.Object or not self.Object.Parent then
+        for _, d in pairs(self.Drawings) do d:Remove() end
+        ESP_Utility.TrackersToUpdate[self.Object] = nil
+        return 
     end
 
-	-- Update additional text drawings (The part that was missing)
-	for i, TextReference in ipairs(self.DrawingOrder) do 
-		local Data = self.Drawings[TextReference]
-		if Data and Data.Drawing then
-            local DrawingObject = Data.Drawing
-            if Data.Function then
-                DrawingObject.Text = tostring(Data.Function())
-            end
-            self:_SetTextPosition(DrawingObject, i - 1)
+    local pos = self.Object.Position
+    local size = self.Object.Size
+    local screenPos, onScreen = WorldToScreen(pos)
+
+    if onScreen then
+        local top, topVisible = WorldToScreen(pos + Vector3.new(0, size.Y/2, 0))
+        local bottom, botVisible = WorldToScreen(pos - Vector3.new(0, size.Y/2, 0))
+        local height = math.abs(top.Y - bottom.Y) * 2
+        local width = height * 1.2
+
+        -- Update Box
+        self.Drawings["Box"].Visible = true
+        self.Drawings["Box"].Size = Vector2.new(width, height)
+        self.Drawings["Box"].Position = Vector2.new(screenPos.X - width/2, screenPos.Y - height/2)
+
+        -- Update Name (Check _G.name toggle)
+        if _G.name == true then
+            self.Drawings["Name"].Visible = true
+            self.Drawings["Name"].Position = Vector2.new(screenPos.X, (screenPos.Y - height/2) - 20)
+        else
+            self.Drawings["Name"].Visible = false
         end
+    else
+        self.Drawings["Box"].Visible = false
+        self.Drawings["Name"].Visible = false
     end
 end
 
--- Start the update loop
+-- Render loop
 RunService.RenderStepped:Connect(function()
     for _, tracker in pairs(ESP_Utility.TrackersToUpdate) do
         tracker:_Update()
+    end
+end)
+
+-- Auto-track players loop
+task.spawn(function()
+    while task.wait(1) do
+        for _, p in ipairs(game.Players:GetPlayers()) do
+            if p ~= game.Players.LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                ESP_Utility.NewTracker(p.Character.HumanoidRootPart, p.Name, Color3.fromRGB(255, 255, 255))
+            end
+        end
     end
 end)
 
