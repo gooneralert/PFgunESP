@@ -1,4 +1,4 @@
-local SHOW_NAME = true
+local SHOW_NAME = true -- true = show player name, false = hide player name
 
 local URL = "https://raw.githubusercontent.com/artxficial/matchastuff/main/esp_utility.lua"
 local src = game:HttpGet(URL)
