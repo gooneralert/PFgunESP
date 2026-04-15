@@ -1,0 +1,67 @@
+local URL = "https://raw.githubusercontent.com/artxficial/matchastuff/main/esp_utility.lua"
+
+local src = game:HttpGet(URL)
+src = src:gsub("game%.Players%.LocalPlayer", 'game:GetService("Players").LocalPlayer')
+src = src:gsub("game%.Players", 'game:GetService("Players")')
+-- remove the distance text from BuildVisualTracker
+src = src:gsub('self:AddText%("Distance".-end%)', '')
+loadstring(src)()
+
+local ESP = _G.ESP_Utility
+
+ESP_Utility._GetDistance = function(self) return 0 end
+ESP_Utility._IsAlive = function(self)
+    if not self.Object then return false end
+    return true
+end
+
+local playersFolder = workspace:WaitForChild("Players")
+local trackers = {}
+
+local function getGun(playerFolder)
+    for _, child in next, playerFolder:GetChildren() do
+        if child.ClassName == "Model" then
+            return child.Name
+        end
+    end
+    return "Unknown"
+end
+
+while true do
+    local aliveKeys = {}
+
+    for _, teamFolder in next, playersFolder:GetChildren() do
+        for _, playerFolder in next, teamFolder:GetChildren() do
+            for _, inner in next, playerFolder:GetChildren() do
+                local gui = inner:FindFirstChild("NameTagGui")
+                if gui then
+                    local tag = gui:FindFirstChild("PlayerTag")
+                    if tag then
+                        local key = tostring(inner)
+                        aliveKeys[key] = true
+
+                        if not trackers[key] then
+                            local name = tag.Text or "Unknown"
+                            local tracker = ESP.NewTracker(inner, name, Color3.fromRGB(255, 200, 0))
+                            if tracker then
+                                tracker:AddText("Gun", Color3.fromRGB(150, 220, 255), "Gun: ?", function()
+                                    return getGun(playerFolder)
+                                end)
+                                trackers[key] = tracker
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    for key, tracker in next, trackers do
+        if not aliveKeys[key] then
+            tracker:Destroy()
+            trackers[key] = nil
+        end
+    end
+
+    task.wait(0.5)
+end
