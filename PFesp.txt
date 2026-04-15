@@ -1,3 +1,5 @@
+_G.name = false -- true = show names, false = hide names
+
 local URL = "https://raw.githubusercontent.com/artxficial/matchastuff/main/esp_utility.lua"
 local src = game:HttpGet(URL)
 
@@ -9,7 +11,7 @@ loadstring(src)()
 
 local ESP = _G.ESP_Utility
 
-ESP_Utility._GetDistance = function(self)
+ESP_Utility._GetDistance = function()
     return 0
 end
 
@@ -20,14 +22,15 @@ end
 local playersFolder = workspace:WaitForChild("Players")
 local trackers = {}
 
-local function showName()
-    return _G.name ~= false
+local function shouldShowName()
+    return _G.name == true
 end
 
 local function getGun(playerFolder)
     for _, child in next, playerFolder:GetChildren() do
         if child.ClassName == "Model" then
             local gunName = child.Name
+
             gunName = gunName:gsub("Main", "")
             gunName = gunName:gsub("^%s+", "")
             gunName = gunName:gsub("%s+$", "")
@@ -37,8 +40,7 @@ local function getGun(playerFolder)
             end
         end
     end
-
-    return "Unknown"
+    return nil
 end
 
 while true do
@@ -48,31 +50,26 @@ while true do
         for _, playerFolder in next, teamFolder:GetChildren() do
             for _, inner in next, playerFolder:GetChildren() do
                 local gui = inner:FindFirstChild("NameTagGui")
-
                 if gui then
                     local tag = gui:FindFirstChild("PlayerTag")
-
                     if tag then
+
                         local key = tostring(inner)
                         aliveKeys[key] = true
 
                         if not trackers[key] then
-                            local trackerName = ""
+                            local trackerName = shouldShowName() and (tag.Text or "Unknown") or nil
 
-                            if showName() then
-                                trackerName = tag.Text or "Unknown"
-                            end
-
-                            local tracker = ESP.NewTracker(inner, trackerName, Color3.fromRGB(255, 200, 0))
+                            local tracker = ESP.NewTracker(
+                                inner,
+                                trackerName,
+                                Color3.fromRGB(255, 200, 0)
+                            )
 
                             if tracker then
                                 tracker:AddText("Gun", Color3.fromRGB(150, 220, 255), "", function()
                                     local gun = getGun(playerFolder)
-
-                                    if gun == "Unknown" then
-                                        return ""
-                                    end
-
+                                    if not gun then return "" end
                                     return gun
                                 end)
 
