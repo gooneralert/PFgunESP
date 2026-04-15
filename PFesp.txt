@@ -1,10 +1,10 @@
 local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
 local ESP_Utility = {}
-local UpdateThread = nil
 ESP_Utility.__index = ESP_Utility
 
 -- Configuration options
-local showPlayerNames = true  -- Toggle this to true/false to show/hide player names
+local showPlayerNames = true 
 
 ESP_Utility.TrackersToUpdate = {}
 
@@ -13,6 +13,11 @@ local function magnitude(p1, p2)
 	local dy = p2.Y - p1.Y
 	local dz = p2.Z - p1.Z
 	return math.sqrt(dx*dx + dy*dy + dz*dz)
+end
+
+local function WorldToScreen(position)
+    local screenPos, onScreen = Camera:WorldToViewportPoint(position)
+    return Vector2.new(screenPos.X, screenPos.Y), onScreen
 end
 
 local BasePartTypes = {
@@ -27,39 +32,29 @@ local function IsValidObject(Object)
 		local Type = BasePartTypes[Object.ClassName]
 		return Type
 	end
-
 	return nil
 end
 
 local function GetObjectFromModel(Model)
 	local CommonNames = {"HumanoidRootPart","Root", "RootPart", "Core"}
-
-
-	-- 1. Try to find a standard Root Part first
 	local Children = Model:GetChildren()
 
-	for _, Name in CommonNames do
-		for _, Child in Children do
-			-- Convert the current child's name to lowercase for comparison
+	for _, Name in ipairs(CommonNames) do
+		for _, Child in ipairs(Children) do
 			if string.lower(Child.Name) == string.lower(Name) and BasePartTypes[Child.ClassName] == "BasePart" then
 				return Child
 			end
 		end
 	end
 
-	-- 2. If its a model try its PrimaryPart
-	if Model.ClassName == "Model" then 
-		local PrimaryPart = Model.PrimaryPart
-		return PrimaryPart
+	if Model.ClassName == "Model" and Model.PrimaryPart then 
+		return Model.PrimaryPart
 	end
 
-	-- 3. Fallback: Find the largest part by volume
 	local LargestPart = nil
 	local MaxVolume = 0
-
-	for _, Child in Model:GetChildren() do	
+	for _, Child in ipairs(Model:GetChildren()) do	
 		if BasePartTypes[Child.ClassName] then
-			-- Volume = Size.X * Size.Y * Size.Z
 			local Volume = Child.Size.X * Child.Size.Y * Child.Size.Z
 			if Volume > MaxVolume then
 				MaxVolume = Volume
@@ -67,32 +62,22 @@ local function GetObjectFromModel(Model)
 			end
 		end
 	end
-
 	return LargestPart
 end
 
 function ESP_Utility.NewTracker(Object, CustomName, Color)
 	local ObjectType = IsValidObject(Object)
-	if not ObjectType then 
-		warn("[ERROR] The tracker only accepts models, baseparts, meshparts, or unions. || Received: ", Object) 
-		return 
-	end 
-
+	if not ObjectType then return end 
 
 	if ObjectType == "Model" then 
-		--	print("[MODEL] Model received")
 		local Model = Object
 		CustomName = CustomName or Object.Name
 		Object = GetObjectFromModel(Model)
-		if Object == nil then 
-			warn(string.format("[ERROR] Could not add Model: %s because it had no valid parts inside of it", Model.Name)) 
-			return
-		end 
+		if Object == nil then return end 
 	end
 
-	if ESP_Utility.TrackersToUpdate[Object.Address] then
-		--	print("Already exists")
-		return ESP_Utility.TrackersToUpdate[Object.Address]
+	if ESP_Utility.TrackersToUpdate[Object] then
+		return ESP_Utility.TrackersToUpdate[Object]
 	end
 
 	local self = setmetatable({}, ESP_Utility)
@@ -105,21 +90,30 @@ function ESP_Utility.NewTracker(Object, CustomName, Color)
 	self.Visible = true
 	self.TrackerOffScreen = false
 
-	self:BuildVisualTracker()
+    -- Create default Square drawing
+    self.Drawings["Square"] = {
+        Drawing = Drawing.new("Square"),
+        Visible = true
+    }
+    self.Drawings["Square"].Drawing.Thickness = 1
+    self.Drawings["Square"].Drawing.Filled = false
+    self.Drawings["Square"].Drawing.Color = self.Color
 
-	ESP_Utility.TrackersToUpdate[Object.Address] = self
+	ESP_Utility.TrackersToUpdate[Object] = self
 	return self
 end
 
+function ESP_Utility:Destroy()
+    for _, data in pairs(self.Drawings) do
+        local obj = (type(data) == "table" and data.Drawing) or data
+        obj:Remove()
+    end
+    ESP_Utility.TrackersToUpdate[self.Object] = nil
+end
+
 function ESP_Utility:_IsAlive()
-	if not self.Object then return false end 
-
-	local InWorkspace = self.Object:IsDescendantOf(game.Workspace)
-	if not InWorkspace then 
-		return false 
-	end 
-
-	return true
+	if not self.Object or not self.Object.Parent then return false end 
+	return self.Object:IsDescendantOf(game.Workspace)
 end
 
 local CORNER_OFFSETS = {
@@ -137,122 +131,51 @@ function ESP_Utility:_Get2D_Bounds()
 	local minX, minY =  math.huge,  math.huge
 	local maxX, maxY = -math.huge, -math.huge
 
-	if self.ObjectType ~= "Model" then
-		for i = 1, 8 do
-			local offset = CORNER_OFFSETS[i]
-			local worldPos = Vector3.new(
-				position.X + offset.X * half.X,
-				position.Y + offset.Y * half.Y,
-				position.Z + offset.Z * half.Z
-			)
+    for i = 1, 8 do
+        local offset = CORNER_OFFSETS[i]
+        local worldPos = position + (offset * half)
+        local screenPos, onScreen = WorldToScreen(worldPos)
 
-			local screenPos, onScreen = WorldToScreen(worldPos)
+        if not onScreen then return nil end 
 
-			if not onScreen then return nil end 
-
-			if onScreen then
-				if screenPos.X < minX then minX = screenPos.X end
-				if screenPos.Y < minY then minY = screenPos.Y end
-				if screenPos.X > maxX then maxX = screenPos.X end
-				if screenPos.Y > maxY then maxY = screenPos.Y end
-			end
-		end
-		return minX, minY, maxX, maxY
-	end
-
-	local Position = self.Object.Position
-	local Size     = self.Object.Size
-
-	local ScreenCenter, CenterVisible = WorldToScreen(Position)
-	local ScreenTop,    TopVisible    = WorldToScreen(Position + Vector3.new(0, Size.Y * 0.5, 0))
-
-	if not CenterVisible or not TopVisible then return nil end
-
-	local Height = math.abs(ScreenCenter.Y - ScreenTop.Y) * 5
-	local Width  = Height * 1.2
-	local halfW  = Width  * 0.5
-	local halfH  = Height * 0.5
-
-	return
-		ScreenCenter.X - halfW,
-	ScreenCenter.Y - halfH,
-	ScreenCenter.X + halfW,
-	ScreenCenter.Y + halfH
-end
-
-
-
-
-
-function ESP_Utility:_GetDistance()
-	local Character = game.Players.LocalPlayer.Character
-	if not Character then return 0 end 
-
-	local HRP = Character.HumanoidRootPart
-	if not HRP or not HRP.Parent then return 0 end 
-
-	return magnitude(HRP.Position, self.Object.Position)
+        if screenPos.X < minX then minX = screenPos.X end
+        if screenPos.Y < minY then minY = screenPos.Y end
+        if screenPos.X > maxX then maxX = screenPos.X end
+        if screenPos.Y > maxY then maxY = screenPos.Y end
+    end
+    return minX, minY, maxX, maxY
 end
 
 function ESP_Utility:_SetTextPosition(DrawingObject, Y_Offset)
 	local Session = self.Session
 	local FontSize = DrawingObject.Size or 20
 	local Padding = 5
-
-	local textLength = 0 
-	for line in string.gmatch(DrawingObject.Text, "[^\n]+") do
-		local length = #line
-		if length > textLength then
-			textLength = length
-		end
-	end
-
-
-	-- 1. Manual X Centering 
-	-- We approximate width: Average char is about half the height wide
-
-	local estimatedWidth = textLength * (FontSize * 0.45) 
-	local manualCenterX = Session.CenterX - (estimatedWidth / 2)
-
-	-- 2. Upward Y Calculation
-	-- As Y_Offset increases (0, 1, 5, 6), this value gets smaller (higher on screen)
-	local FinalY = Session.TopY - Padding - ((Y_Offset + 1) * FontSize)
-
-	-- 3. Apply Position
-	DrawingObject.Center = false 
-	DrawingObject.Position = Vector2.new(manualCenterX, FinalY)
+    
+    DrawingObject.Center = true
+	DrawingObject.Position = Vector2.new(Session.CenterX, Session.TopY - Padding - ((Y_Offset + 1) * FontSize))
 end
 
 function ESP_Utility:_DetermineVisibility()
-	local isOffScreen  = self.TrackerOffScreen
-	local isVisible    = self.Visible
+	local shouldRender = self.Visible and not self.TrackerOffScreen
 
-	local shouldRender = isVisible and not isOffScreen
-
-	for drawingName, data in self.Drawings do
+	for drawingName, data in pairs(self.Drawings) do
 		local DrawingObject = (type(data) == "table" and data.Drawing) or data
-
 		if not shouldRender then
 			DrawingObject.Visible = false
-			continue
+		else
+			DrawingObject.Visible = data.Visible or true
 		end
-
-		local setting = data.Visible
-		DrawingObject.Visible = setting
 	end
-
 	return shouldRender
 end
 
 function ESP_Utility:_Update()
-	if not self:_IsAlive() or not self.ObjectType then 
+	if not self:_IsAlive() then 
 		self:Destroy()
 		return 
 	end 
 
 	local min_x, min_y, max_x, max_y = self:_Get2D_Bounds()
-	local Hidden = false
-
 	self.TrackerOffScreen = (min_x == nil)
 
 	local ShouldRender = self:_DetermineVisibility()
@@ -264,15 +187,32 @@ function ESP_Utility:_Update()
 		TopY = min_y
 	}
 
-
 	-- Update Square
-	local Square = self.Drawings["Square"].Drawing
-	Square.Position = Vector2.new(min_x, min_y)
-	Square.Size = Vector2.new(boxWidth, max_y - min_y)
+	local SquareData = self.Drawings["Square"]
+    if SquareData then
+        local Square = SquareData.Drawing
+        Square.Position = Vector2.new(min_x, min_y)
+        Square.Size = Vector2.new(boxWidth, max_y - min_y)
+    end
 
-	-- Update texts
-	for _, TextReference in self.DrawingOrder do 
+	-- Update additional text drawings (The part that was missing)
+	for i, TextReference in ipairs(self.DrawingOrder) do 
 		local Data = self.Drawings[TextReference]
-		local DrawingObject = Data.Drawing
-		local Callback = Data.Function
-		local Index = Data
+		if Data and Data.Drawing then
+            local DrawingObject = Data.Drawing
+            if Data.Function then
+                DrawingObject.Text = tostring(Data.Function())
+            end
+            self:_SetTextPosition(DrawingObject, i - 1)
+        end
+    end
+end
+
+-- Start the update loop
+RunService.RenderStepped:Connect(function()
+    for _, tracker in pairs(ESP_Utility.TrackersToUpdate) do
+        tracker:_Update()
+    end
+end)
+
+return ESP_Utility
