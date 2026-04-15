@@ -1,11 +1,8 @@
-local SHOW_NAME = (_G.name ~= false)
-
 local URL = "https://raw.githubusercontent.com/artxficial/matchastuff/main/esp_utility.lua"
 local src = game:HttpGet(URL)
+
 src = src:gsub("game%.Players%.LocalPlayer", 'game:GetService("Players").LocalPlayer')
 src = src:gsub("game%.Players", 'game:GetService("Players")')
-
--- remove distance text
 src = src:gsub('self:AddText%("Distance".-end%)', '')
 
 loadstring(src)()
@@ -17,26 +14,30 @@ ESP_Utility._GetDistance = function(self)
 end
 
 ESP_Utility._IsAlive = function(self)
-    if not self.Object then return false end
-    return true
+    return self.Object ~= nil
 end
 
 local playersFolder = workspace:WaitForChild("Players")
 local trackers = {}
 
+local function showName()
+    return _G.name ~= false
+end
+
 local function getGun(playerFolder)
     for _, child in next, playerFolder:GetChildren() do
         if child.ClassName == "Model" then
             local gunName = child.Name
-
-            -- remove "Main"
-            gunName = gunName:gsub("Main", ""):gsub("^%s+", ""):gsub("%s+$", "")
+            gunName = gunName:gsub("Main", "")
+            gunName = gunName:gsub("^%s+", "")
+            gunName = gunName:gsub("%s+$", "")
 
             if gunName ~= "" then
                 return gunName
             end
         end
     end
+
     return "Unknown"
 end
 
@@ -56,8 +57,13 @@ while true do
                         aliveKeys[key] = true
 
                         if not trackers[key] then
-                            local name = SHOW_NAME and (tag.Text or "Unknown") or ""
-                            local tracker = ESP.NewTracker(inner, name, Color3.fromRGB(255, 200, 0))
+                            local trackerName = ""
+
+                            if showName() then
+                                trackerName = tag.Text or "Unknown"
+                            end
+
+                            local tracker = ESP.NewTracker(inner, trackerName, Color3.fromRGB(255, 200, 0))
 
                             if tracker then
                                 tracker:AddText("Gun", Color3.fromRGB(150, 220, 255), "", function()
