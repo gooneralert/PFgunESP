@@ -1,108 +1,90 @@
-local RunService = game:GetService("RunService")
-local Camera = workspace.CurrentCamera
-local ESP_Utility = {}
-ESP_Utility.__index = ESP_Utility
+local SHOW_NAME = true
 
-ESP_Utility.TrackersToUpdate = {}
+local URL = "https://raw.githubusercontent.com/artxficial/matchastuff/main/esp_utility.lua"
+local src = game:HttpGet(URL)
+src = src:gsub("game%.Players%.LocalPlayer", 'game:GetService("Players").LocalPlayer')
+src = src:gsub("game%.Players", 'game:GetService("Players")')
 
-local function WorldToScreen(position)
-    local screenPos, onScreen = Camera:WorldToViewportPoint(position)
-    return Vector2.new(screenPos.X, screenPos.Y), onScreen
+-- remove distance text
+src = src:gsub('self:AddText%("Distance".-end%)', '')
+
+loadstring(src)()
+
+local ESP = _G.ESP_Utility
+
+ESP_Utility._GetDistance = function(self)
+    return 0
 end
 
-function ESP_Utility.NewTracker(Object, CustomName, Color)
-    -- Using .Address is critical for External LuaVMs to track memory pointers
-    local addr = Object.Address 
-    if not addr then return end
-    if ESP_Utility.TrackersToUpdate[addr] then return ESP_Utility.TrackersToUpdate[addr] end
-
-    local self = setmetatable({}, ESP_Utility)
-    self.Name = CustomName or "Player"
-    self.Object = Object
-    self.Color = Color or Color3.fromRGB(255, 255, 255)
-    self.Drawings = {}
-
-    -- Initialize Box
-    local box = Drawing.new("Square")
-    box.Thickness = 1
-    box.Filled = false
-    box.Color = self.Color
-    box.Visible = false
-    self.Drawings["Box"] = box
-
-    -- Initialize Name
-    local name = Drawing.new("Text")
-    name.Size = 18
-    name.Center = true
-    name.Outline = true
-    name.Color = Color3.new(1, 1, 1)
-    name.Visible = false
-    self.Drawings["Name"] = name
-
-    ESP_Utility.TrackersToUpdate[addr] = self
-    return self
+ESP_Utility._IsAlive = function(self)
+    if not self.Object then return false end
+    return true
 end
 
-function ESP_Utility:_Update()
-    -- Check if the object still exists in memory
-    if not self.Object or not self.Object.Parent then
-        for _, d in pairs(self.Drawings) do d.Visible = false d:Remove() end
-        ESP_Utility.TrackersToUpdate[self.Object.Address] = nil
-        return 
-    end
+local playersFolder = workspace:WaitForChild("Players")
+local trackers = {}
 
-    local pos = self.Object.Position
-    local screenPos, onScreen = WorldToScreen(pos)
+local function getGun(playerFolder)
+    for _, child in next, playerFolder:GetChildren() do
+        if child.ClassName == "Model" then
+            local gunName = child.Name
 
-    if onScreen then
-        -- Calculate size based on distance
-        local camPos = Camera.CFrame.Position
-        local dist = (camPos - pos).Magnitude
-        local sizeMult = 2000 / dist
-        local width, height = sizeMult, sizeMult * 1.5
+            -- remove "Main"
+            gunName = gunName:gsub("Main", ""):gsub("^%s+", ""):gsub("%s+$", "")
 
-        -- Update Box
-        self.Drawings["Box"].Size = Vector2.new(width, height)
-        self.Drawings["Box"].Position = Vector2.new(screenPos.X - width/2, screenPos.Y - height/2)
-        self.Drawings["Box"].Visible = true
-
-        -- Update Name Toggle
-        if _G.name == true then
-            self.Drawings["Name"].Text = self.Name
-            self.Drawings["Name"].Position = Vector2.new(screenPos.X, (screenPos.Y - height/2) - 20)
-            self.Drawings["Name"].Visible = true
-        else
-            self.Drawings["Name"].Visible = false
+            if gunName ~= "" then
+                return gunName
+            end
         end
-    else
-        self.Drawings["Box"].Visible = false
-        self.Drawings["Name"].Visible = false
     end
+    return "Unknown"
 end
 
--- Render loop to keep boxes stuck to players
-RunService.RenderStepped:Connect(function()
-    for _, tracker in pairs(ESP_Utility.TrackersToUpdate) do
-        tracker:_Update()
-    end
-end)
+while true do
+    local aliveKeys = {}
 
--- Tracking Loop: Optimized for Externals
-task.spawn(function()
-    print("ESP Utility: Searching for targets...")
-    while task.wait(2) do
-        for _, p in ipairs(game.Players:GetPlayers()) do
-            if p ~= game.Players.LocalPlayer then
-                -- Check for standard character or PF's specific model setup
-                local char = p.Character
-                local root = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("RootPart") or char.PrimaryPart)
-                
-                if root then
-                    ESP_Utility.NewTracker(root, p.Name, Color3.fromRGB(255, 255, 255))
+    for _, teamFolder in next, playersFolder:GetChildren() do
+        for _, playerFolder in next, teamFolder:GetChildren() do
+            for _, inner in next, playerFolder:GetChildren() do
+                local gui = inner:FindFirstChild("NameTagGui")
+
+                if gui then
+                    local tag = gui:FindFirstChild("PlayerTag")
+
+                    if tag then
+                        local key = tostring(inner)
+                        aliveKeys[key] = true
+
+                        if not trackers[key] then
+                            local name = SHOW_NAME and (tag.Text or "Unknown") or ""
+                            local tracker = ESP.NewTracker(inner, name, Color3.fromRGB(255, 200, 0))
+
+                            if tracker then
+                                tracker:AddText("Gun", Color3.fromRGB(150, 220, 255), "", function()
+                                    local gun = getGun(playerFolder)
+
+                                    if gun == "Unknown" then
+                                        return ""
+                                    end
+
+                                    return gun
+                                end)
+
+                                trackers[key] = tracker
+                            end
+                        end
+                    end
                 end
             end
         end
     end
-end)
 
-return ESP_Utility
+    for key, tracker in next, trackers do
+        if not aliveKeys[key] then
+            tracker:Destroy()
+            trackers[key] = nil
+        end
+    end
+
+    task.wait(0.5)
+end
